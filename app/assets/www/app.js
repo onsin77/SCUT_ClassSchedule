@@ -47,6 +47,8 @@
             marks: {},
             colors: {},
             days: {},
+            fortune: { log: {} },
+            todos: [],
             msgs: {},
             settings: {
                 dailyOn: true,
@@ -57,7 +59,7 @@
                 notifyNormal: true,
                 notifyEasy: false,
                 signOn: false,
-                periods: 11,
+                periods: 12,
                 totalWeeks: 20,
                 timetable: 'dxc',
                 weekend: 'auto'
@@ -79,6 +81,10 @@
         // 每日提醒从两条（早/中）扩成三条（早上/下午/晚上），老数据补上
         if (!Array.isArray(DB.settings.dailyTimes) || DB.settings.dailyTimes.length !== 3) {
             DB.settings.dailyTimes = ['08:00', '13:00', '18:00'];
+        }
+        // 大学城作息本来就是 12 节，老默认值是 11；只在"没改过"（还是旧默认）时补成 12
+        if (DB.settings.timetable === 'dxc' && DB.settings.periods === 11) {
+            DB.settings.periods = 12;
         }
     }
 
@@ -108,6 +114,15 @@
         var h = 0;
         for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
         return h.toString(36);
+    }
+
+    /** 附件里第一张图（通知大图用），没有就返回空串 */
+    function firstImage(atts) {
+        for (var i = 0; i < (atts || []).length; i++) {
+            var src = atts[i].tn || atts[i].d || '';
+            if (src.indexOf('data:image/') === 0) return src;
+        }
+        return '';
     }
 
     /* ------------------------------------------------------------------ 日期 */
@@ -362,12 +377,19 @@
         $('wkRange').textContent = fmtWeekRange(currentWeek) + '　共 ' + totalWeeks() + ' 周';
         $('wkNow').hidden = isThisWeek;
 
-        // 表头。整格就是一个隐形的按钮（点了打开当天的编辑），所以外观和以前完全一样
+        // 表头。整格就是一个隐形的按钮（点了打开当天的编辑），所以外观和以前完全一样。
+        // 只有「有日期但没填时间」的提醒事项会在这一天打个小铃铛。
+        var todoDays = days.filter(function (d) {
+            var date = dateOf(currentWeek, d);
+            return (DB.todos || []).some(function (td) { return !td.time && todoApplies(td, date); });
+        });
         var h = '<div class="kb-spacer"></div>';
         days.forEach(function (d) {
             var cls = (isThisWeek && d === todayDow) ? 'kb-daycell today' : 'kb-daycell';
             var dt = dateOf(currentWeek, d);
-            h += '<div class="' + cls + '" data-date="' + ymd(dt) + '"><b>' + DAY_SINGLE[d] + '</b><span>' +
+            h += '<div class="' + cls + '" data-date="' + ymd(dt) + '">' +
+                (todoDays.indexOf(d) >= 0 ? '<i class="kb-todo">🔔</i>' : '') +
+                '<b>' + DAY_SINGLE[d] + '</b><span>' +
                 (dt.getMonth() + 1) + '/' + dt.getDate() + '</span></div>';
         });
         $('kbDays').innerHTML = h;
@@ -387,6 +409,21 @@
             y += 54;
         }
         var totalH = y;
+
+        /** 把一天里的一个时刻换算成课表上的 y（和课块同一套坐标系） */
+        var yFor = function (hhmm) {
+            var t0 = hm(hhmm), mins = t0.h * 60 + t0.m, k;
+            for (k = 1; k <= P; k++) {
+                var a = hm(periodTime(k, 'start')), b = hm(periodTime(k, 'end'));
+                var am = a.h * 60 + a.m, bm = b.h * 60 + b.m;
+                if (mins >= am && mins <= bm) return tops[k] + (mins - am) / Math.max(1, bm - am) * 54;
+            }
+            for (k = P; k >= 1; k--) {          // 落在课间（比如午休）：贴着上一节的底边
+                var s0 = hm(periodTime(k, 'start'));
+                if (mins >= s0.h * 60 + s0.m) return tops[k] + 54;
+            }
+            return 0;
+        };
 
         // 左侧时间列：时间贴着每节的上边缘，读出来就是「这节课几点开始」
         var t = '';
@@ -416,6 +453,22 @@
             });
         });
         var lanes = assignLanes(items);
+
+        // 提醒事项里填了时间的：那一刻有课就把铃铛挂在那节课上，没课就在那一刻画个小条
+        var todoOn = {}, todoChips = [];
+        (DB.todos || []).forEach(function (td) {
+            if (!td.time) return;
+            days.forEach(function (d) {
+                if (!todoApplies(td, dateOf(currentWeek, d))) return;
+                var ty = yFor(td.time), hit = null;
+                items.forEach(function (it) {
+                    if (!hit && it.col === d && ty >= tops[it.e.s] && ty < tops[it.e.e] + 54) hit = it;
+                });
+                if (hit) todoOn[hit.e.id + '@' + d] = true;
+                else todoChips.push({ col: d, y: ty, time: td.time, name: td.name });
+            });
+        });
+
         var blocks = '';
         items.forEach(function (it) {
             var e = it.e;
@@ -435,6 +488,7 @@
             else if (st === 'miss') glyph = '<span class="bglyph" style="color:#D64545">✗</span>';
             else if (st === 'leave' || it.off) glyph = '<span class="bglyph" style="color:#8A92A0">⊘</span>';
             var marks = '';
+            if (todoOn[e.id + '@' + it.col]) marks += '🔔';
             if (e.tag === 'important') marks += '⭐';
             else if (e.tag === 'easy') marks += '💧';
             if (m.note && m.note.trim()) marks += '📝';
@@ -445,6 +499,12 @@
                 '<div class="bn">' + esc(e.name) + '</div>' +
                 (height > 44 ? '<div class="br">' + esc(e.room || '') + '</div>' : '') +
                 (marks ? '<div class="bmark">' + marks + '</div>' : '') + glyph + '</div>';
+        });
+        todoChips.forEach(function (c) {
+            var w = 100 / days.length;
+            blocks += '<div class="kb-todochip" style="left:calc(' + (days.indexOf(c.col) * w) + '% + 1px);' +
+                'width:calc(' + w + '% - 2px);top:' + c.y + 'px">' +
+                '🔔 ' + esc(c.time) + ' ' + esc(c.name) + '</div>';
         });
         $('kbBlocks').innerHTML = blocks;
 
@@ -526,13 +586,20 @@
             .sort(function (a, b) { return b.at - a.at; });
     }
 
-    /** 某条消息对应的那节课，这次带了哪些附件 */
+    /** 某条消息对应的那节课（或那条提醒事项），这次带了哪些附件 */
     function msgFiles(key) {
         var g = /^p(\d{4}-\d{2}-\d{2})_(.+)$/.exec(key);
-        if (!g) return [];
-        var e = DB.entries.filter(function (x) { return x.id === g[2]; })[0];
-        if (!e) return [];
-        return getMark(e, weekOf(parseYmd(g[1]))).files || [];
+        if (g) {
+            var e = DB.entries.filter(function (x) { return x.id === g[2]; })[0];
+            if (!e) return [];
+            return getMark(e, weekOf(parseYmd(g[1]))).files || [];
+        }
+        var t = /^t(\d{4}-\d{2}-\d{2})_(.+)$/.exec(key);
+        if (t) {
+            var td = todoById(t[2]);
+            return td ? (td.files || []) : [];
+        }
+        return [];
     }
 
     function openMsgDetail(key) {
@@ -750,6 +817,34 @@
         A.openFile(f.n, f.t || 'application/octet-stream', f.d.slice(f.d.indexOf(',') + 1));
     }
 
+    /* 备注和提醒事项共用同一套附件区：attCtx 指向当前正在编辑的那份 files */
+    var attCtx = null;      // { files, redraw }
+
+    function attEditorHtml() {
+        return '<div class="flabel" style="margin-top:12px">附件</div>' +
+            '<div id="attList">' + attHtml(attCtx.files, true) + '</div>' +
+            '<div class="quick-row">' +
+            '<button class="quick" id="attImg">＋ 图片</button>' +
+            '<button class="quick" id="attFile">＋ 文件</button>' +
+            '</div>';
+    }
+
+    /** 附件区的点击统一走这里；处理掉了就返回 true */
+    function attClick(ev) {
+        if (!attCtx) return false;
+        var del = ev.target.closest('.att-del');
+        if (del) { attCtx.files.splice(+del.dataset.del, 1); attCtx.redraw(); return true; }
+        var it = ev.target.closest('.att-item');
+        if (it) { openAtt(attCtx.files[+it.dataset.att]); return true; }
+        if (ev.target.id === 'attImg' || ev.target.id === 'attFile') {
+            if (!A || !A.pickFile) { toast('请在 App 内使用该功能'); return true; }
+            attTok = 'a' + Date.now();
+            A.pickFile(attTok, ev.target.id === 'attImg' ? 'image/*' : '*/*');
+            return true;
+        }
+        return false;
+    }
+
     /* ------------------------------------------------------------------ 编辑表单 */
 
     var editWeeks = [];
@@ -916,8 +1011,35 @@
             var w = weekOf(d);
             if (w < 1 || w > maxW) continue;
             var dow = dowOf(d);
+            var dstr = ymd(d);
+
+            // ---------- 提醒事项 ----------
+            // 和课程无关：整天停课的日子也照发。填了时间就按点发，没填就跟着早课表那一条。
+            (DB.todos || []).forEach(function (td) {
+                if (!todoApplies(td, d)) return;
+                var at = atTime(d, td.time || s.dailyTimes[0] || '08:00');
+                if (at <= now + 20000) return;
+                var lines = [];
+                if (td.desc && td.desc.trim()) lines.push(td.desc.trim());
+                var files = td.files || [];
+                if (files.length) lines.push('📎 ' + files.map(function (f) { return f.n; }).join('、'));
+                var item = {
+                    at: at,
+                    title: '🔔 ' + td.name,
+                    body: lines.join('\n') || '到点啦',
+                    channel: 'preclass'
+                };
+                var pic = firstImage(files);
+                if (pic) {
+                    var pk = 'i' + hashOf(pic);
+                    planImgs[pk] = pic;
+                    item.img = pk;
+                }
+                plan['t' + dstr + '_' + td.id] = item;
+            });
+
             var dp = dayCourses(d);
-            if (dp.off) continue;                    // 整天停课：这天不推任何提醒
+            if (dp.off) continue;                    // 整天停课：这天不推课程提醒
             // 同一天里，同一门课（名字+节次+地点+老师）只留一条。
             // 万一课表被导入过两遍留下重复条目，这里兜住，不会推两条一模一样的提醒。
             var seen = {};
@@ -927,7 +1049,6 @@
                 seen[sig] = 1;
                 return true;
             });
-            var dstr = ymd(d);
 
             // ---------- 每日课表 ----------
             // 早上那条给一整天的课表；下午、晚上各自只发本段的课，那段没课就不打扰。
@@ -982,11 +1103,7 @@
                     // 备注的附件：文件名列进正文；第一张图片挂成通知大图
                     var atts = m.files || [];
                     if (atts.length) lines.push('📎 ' + atts.map(function (f) { return f.n; }).join('、'));
-                    var pic = null, i;
-                    for (i = 0; i < atts.length; i++) {
-                        var src = atts[i].tn || atts[i].d || '';
-                        if (src.indexOf('data:image/') === 0) { pic = src; break; }
-                    }
+                    var pic = firstImage(atts);
                     var item = {
                         at: at,
                         title: '还有 ' + mins + ' 分钟上课 · ' + e.name,
@@ -1337,6 +1454,8 @@
             var el = ev.target.closest('.kb-daycell');
             if (el && el.dataset.date) openDaySheet(el.dataset.date);
         });
+        $('moreTodo').addEventListener('click', drawTodoList);
+        $('moreFortune').addEventListener('click', openFortune);
         $('moreSwap').addEventListener('click', openSwapTool);
         $('rawList').addEventListener('click', function (ev) {
             var el = ev.target.closest('.course-card');
@@ -1437,6 +1556,11 @@
             toast('消息中心已清空');
         });
         $('setHelp').addEventListener('click', openHelp);
+        // 设置页底部那几排联系方式：点了交给系统浏览器 / 邮件 App
+        $('page-set').addEventListener('click', function (ev) {
+            var el = ev.target.closest('.credit-row');
+            if (el && el.dataset.link) openLink(el.dataset.link);
+        });
         $('setClear').addEventListener('click', function () {
             if (!confirm('确定清空全部课程与设置？此操作不可恢复。')) return;
             var fw = DB.meta.firstWeekMonday;
@@ -1582,6 +1706,8 @@
         { i: '✅', t: '签到', d: '需要先在设置里开启。点课块 → 签到，课块右下角打绿勾；过了上课时间还没签会自动打红叉。' },
         { i: '🏷️', t: '标记', d: '把整门课标成「⭐ 重要」或「💧 水课」，提醒文案会跟着变。标记跟着课程走——在任意一节点一次，这门课所有节次都会带上。' },
         { i: '📆', t: '单日禁课 / 调休', d: '课表最上面「周一/周二…」那一格，整格都可以点（看不出按钮，界面和以前一样）。点开能禁用当天课表——当天课块变灰、不再有任何提醒；也能调休，把别的日子的课整天地挪到这天来。' },
+        { i: '🔔', t: '提醒事项（更多页）', d: '交作业、还书这类事记在这里。日期可以指定某一天，也可以选每周固定星期几。填了时间就按点提醒；只填日期的话，当天早上跟着课表那条一起提醒。还能加描述和附件，通知里会带上图片。' },
+        { i: '🔮', t: '每日运势（更多页）', d: '每天第一次点进去抽一次：20% 凶、35% 平、45% 吉，凶和平吉下面还会再细分。中间断了一天没抽，记录就清空重来。' },
         { i: '🔁', t: '调休（更多页）', d: '在「更多」里：填好放假的起止日期（放假期间的课表会被禁用），需要的话点「＋」再加调休，最后点右下角「确定」一起生效。调休不可撤销，会先让你确认一次。' },
         { i: '⚙️', t: '学期设置', d: '设置里可以改：第 1 周星期一、本学期总周数、每天节数、作息时间（大学城 / 五山）、显示周末。' }
     ];
@@ -1589,7 +1715,7 @@
     function openHelp() {
         $('sheetBody').onclick = null;
         var h = '<div class="sheet-head"><span class="t">帮助</span></div>' +
-            '<div class="sheet-sub">华工课程表 v1.0.9 · 每个功能怎么用</div>' +
+            '<div class="sheet-sub">华工课程表 v1.1.2 · 每个功能怎么用</div>' +
             HELP_ITEMS.map(function (o) {
                 return '<div class="help-item"><div class="hi">' + o.i + '</div><div style="flex:1;min-width:0">' +
                     '<div class="ht">' + o.t + '</div><div class="hd">' + o.d + '</div></div></div>';
@@ -1635,15 +1761,11 @@
     function openNoteEditor(e, week) {
         var m = getMark(e, week);
         noteCtx = { e: e, week: week, text: m.note || '', files: (m.files || []).slice() };
+        attCtx = { files: noteCtx.files, redraw: function () { syncNote(); drawNoteEditor(false); } };
         drawNoteEditor(true);
 
         $('sheetBody').onclick = function (ev) {
-            var del = ev.target.closest('.att-del');
-            if (del) { syncNote(); noteCtx.files.splice(+del.dataset.del, 1); drawNoteEditor(false); return; }
-            var it = ev.target.closest('.att-item');
-            if (it) { openAtt(noteCtx.files[+it.dataset.att]); return; }
-            if (ev.target.id === 'attImg') { syncNote(); attTok = 'a' + Date.now(); A.pickFile(attTok, 'image/*'); return; }
-            if (ev.target.id === 'attFile') { syncNote(); attTok = 'a' + Date.now(); A.pickFile(attTok, '*/*'); return; }
+            if (attClick(ev)) return;
             if (ev.target.id === 'noteCancel') { $('sheetBody').onclick = null; openDetail(e.id, week); return; }
             if (ev.target.id === 'noteSave') {
                 syncNote();
@@ -1663,12 +1785,7 @@
             '<div class="sheet-head"><span class="t">备注 · ' + esc(e.name) + '</span></div>' +
             '<div class="sheet-sub">' + DAY_FULL[e.day] + ' 第' + e.s + '-' + e.e + '节 · 第' + week + ' 周（仅此节）</div>' +
             '<textarea id="noteText" class="note-ta" placeholder="写点什么，会跟着课前提醒一起发">' + esc(noteCtx.text) + '</textarea>' +
-            '<div class="flabel" style="margin-top:12px">附件</div>' +
-            '<div id="noteAtts">' + attHtml(noteCtx.files, true) + '</div>' +
-            '<div class="quick-row">' +
-            '<button class="quick" id="attImg">＋ 图片</button>' +
-            '<button class="quick" id="attFile">＋ 文件</button>' +
-            '</div>' +
+            attEditorHtml() +
             '<div class="form-actions"><button class="cancel" id="noteCancel">取消</button>' +
             '<button class="save" id="noteSave">保存</button></div>';
         if (focus) setTimeout(function () {
@@ -1684,7 +1801,7 @@
 
     /** 图片先缩到 1100px 再压成 JPEG，控制住体积；其它文件只在 1MB 以内才收。 */
     function onAttachData(b64, name, mime) {
-        if (!noteCtx) return;
+        if (!attCtx) return;
         if (!b64) { toast(name && name.length < 30 ? name : '未选择文件'); return; }
         if (!mime) mime = /\.(jpe?g|png|gif|webp|bmp)$/i.test(name || '') ? 'image/png' : 'application/octet-stream';
 
@@ -1726,8 +1843,8 @@
             };
             img.src = url;
         }
-        noteCtx.files.push(f);
-        drawNoteEditor(false);
+        attCtx.files.push(f);
+        attCtx.redraw();
         toast('已添加附件');
     }
 
@@ -1997,6 +2114,310 @@
         toast('已生效' + (n ? '（含 ' + n + ' 条调休）' : ''));
     }
 
+    /* ---------- 更多页：每日运势 ---------- */
+
+    // 先定级别（凶 20% / 平 35% / 吉 45%），级别内再按权重细分
+    var FORTUNE_SET = {
+        xiong: { items: [['大凶', 1], ['中凶', 1], ['小凶', 1]] },
+        ping: { items: [['大平', 30], ['中平', 30], ['小平', 30], ['一平如洗', 10]] },
+        ji: { items: [['大吉', 30], ['中吉', 30], ['小吉', 30], ['桃花运', 10 / 3], ['天选之子', 10 / 3], ['王马小吉', 10 / 3]] }
+    };
+    var FORTUNE_KIND = {};      // 运势名 -> 级别
+    var FORTUNE_ORDER = [];     // 统计次数时的展示顺序
+    Object.keys(FORTUNE_SET).forEach(function (k) {
+        FORTUNE_SET[k].items.forEach(function (it) {
+            FORTUNE_KIND[it[0]] = k;
+            FORTUNE_ORDER.push(it[0]);
+        });
+    });
+
+    function pickWeighted(list) {
+        var total = 0, i;
+        for (i = 0; i < list.length; i++) total += list[i][1];
+        var r = Math.random() * total;
+        for (i = 0; i < list.length; i++) {
+            r -= list[i][1];
+            if (r < 0) return list[i][0];
+        }
+        return list[list.length - 1][0];
+    }
+
+    /** 抽一次。昨天中过凶就不出凶（剩下的平、吉按 35:45 重新归一） */
+    function pickFortune(noXiong) {
+        var r = Math.random();
+        var kind = noXiong
+            ? (r < 35 / 80 ? 'ping' : 'ji')
+            : (r < 0.20 ? 'xiong' : (r < 0.55 ? 'ping' : 'ji'));
+        return pickWeighted(FORTUNE_SET[kind].items);
+    }
+
+    function fortuneLog() {
+        if (!DB.fortune.log) DB.fortune.log = {};
+        return DB.fortune.log;
+    }
+
+    /** 抽今天的。昨天没抽过就算断了，之前的记录全部清掉 */
+    function drawFortune() {
+        var log = fortuneLog();
+        var today = ymd(new Date());
+        if (log[today]) return false;
+        var prev = ymd(addDays(startOfDay(new Date()), -1));
+        if (!log[prev]) { DB.fortune.log = log = {}; }
+        log[today] = pickFortune(FORTUNE_KIND[log[prev]] === 'xiong');
+        save();
+        return true;
+    }
+
+    /** 连续抽运天数：从今天往回数，断了就停。今天还没抽就先从昨天起算 */
+    function fortuneStreak() {
+        var log = fortuneLog(), n = 0, d = startOfDay(new Date());
+        if (!log[ymd(d)]) d = addDays(d, -1);
+        while (log[ymd(d)]) { n++; d = addDays(d, -1); }
+        return n;
+    }
+
+    function fortuneDays() { return Object.keys(fortuneLog()).sort().reverse(); }
+
+    function fortuneCounts() {
+        var log = fortuneLog(), out = {};
+        FORTUNE_ORDER.forEach(function (n) { out[n] = 0; });
+        Object.keys(log).forEach(function (d) { if (out[log[d]] !== undefined) out[log[d]]++; });
+        return out;
+    }
+
+    var fortuneAll = false;     // 是否展开全部趋势
+
+    function openFortune() {
+        drawFortune();
+        fortuneAll = false;
+        drawFortuneSheet();
+    }
+
+    function drawFortuneSheet() {
+        var log = fortuneLog();
+        var days = fortuneDays();
+        var today = ymd(new Date());
+        var mine = log[today] || '';
+        var kind = FORTUNE_KIND[mine] || 'ping';
+
+        var h = '<div class="sheet-head"><span class="t">每日运势</span></div>' +
+            '<div class="sheet-sub">每天第一次点进来抽一次，断一天就重新来过</div>';
+
+        if (!days.length) {
+            h += '<div class="ft-hero"><div class="ft-name ft-ping">—</div>' +
+                '<div class="ft-sub">还没有记录</div></div>';
+        } else {
+            var note = '';
+            if (kind === 'xiong') note = dowOf(new Date()) === 4 ? 'vivo50即可消灾' : '日行一善即可消灾';
+            h += '<div class="ft-hero">' +
+                '<div class="ft-name ft-' + kind + '">' + mine + '</div>' +
+                '<div class="ft-sub">已连续抽运 <b>' + fortuneStreak() + '</b> 天</div>' +
+                (note ? '<div class="ft-note">' + note + '</div>' : '') +
+                '</div>';
+        }
+
+        var show = fortuneAll ? days : days.slice(0, 7);
+        h += '<div class="ft-label">' + (fortuneAll ? '全部趋势（' + days.length + ' 天）' : '最近 ' + show.length + ' 天') + '</div>' +
+            '<div class="ft-list">' + show.map(function (d) {
+                var dd = parseYmd(d);
+                return '<div class="ft-row"><span class="ft-date">' + (dd.getMonth() + 1) + '月' + dd.getDate() +
+                    '日 ' + DAY_SHORT[dowOf(dd)] + '</span>' +
+                    '<span class="ft-val ft-' + FORTUNE_KIND[log[d]] + '">' + log[d] + '</span></div>';
+            }).join('') + '</div>';
+
+        if (days.length > 7) {
+            h += '<div class="quick-row">' + (fortuneAll
+                ? '<button class="quick" id="ftBack">只看最近 7 天</button>'
+                : '<button class="quick" id="ftAll">查看全部趋势（共 ' + days.length + ' 天）</button>') +
+                '</div>';
+        }
+
+        var cnt = fortuneCounts();
+        var got = FORTUNE_ORDER.filter(function (n) { return cnt[n] > 0; });
+        if (got.length) {
+            h += '<div class="ft-label" style="margin-top:16px">各运势抽中次数</div>' +
+                '<div class="ft-counts">' + got.map(function (n) {
+                    return '<span class="ft-chip ft-' + FORTUNE_KIND[n] + '">' + n + ' ×' + cnt[n] + '</span>';
+                }).join('') + '</div>';
+        }
+
+        $('sheetBody').innerHTML = h;
+        $('sheetBody').dataset.id = '';
+        $('sheetBody').onclick = function (ev) {
+            if (ev.target.id === 'ftAll') { fortuneAll = true; drawFortuneSheet(); }
+            else if (ev.target.id === 'ftBack') { fortuneAll = false; drawFortuneSheet(); }
+        };
+        openSheet($('sheet'));
+    }
+
+    /** 外部链接（GitHub / 网盘 / 邮箱）交给系统里的 App 打开，别在本 WebView 里跳走 */
+    function openLink(url) {
+        if (A && A.openUrl) A.openUrl(url);
+        else toast(url);
+    }
+
+    /* ---------- 更多页：提醒事项 ---------- */
+
+    function todoById(id) {
+        return (DB.todos || []).filter(function (t) { return t.id === id; })[0];
+    }
+
+    /** 某一天要不要发这条提醒 */
+    function todoApplies(td, date) {
+        if (td.mode === 'week') return (td.days || []).indexOf(dowOf(date)) >= 0;
+        return !!td.date && td.date === ymd(date);
+    }
+
+    /** 「每周一三 08:00」这样的一句话 */
+    function todoWhenText(td) {
+        var when = '';
+        if (td.mode === 'week') {
+            when = '每周' + (td.days || []).slice().sort().map(function (d) { return DAY_SINGLE[d]; }).join('');
+        } else if (td.date) {
+            when = md(parseYmd(td.date));
+        }
+        return when + (td.time ? ' ' + td.time : '（跟早课表一起）');
+    }
+
+    function drawTodoList() {
+        var list = (DB.todos || []).slice().sort(function (a, b) {
+            var ka = a.mode === 'week' ? '9' : (a.date || '9');
+            var kb = b.mode === 'week' ? '9' : (b.date || '9');
+            return ka < kb ? -1 : (ka > kb ? 1 : 0);
+        });
+        $('sheetBody').innerHTML =
+            '<div class="sheet-head"><span class="t">提醒事项</span></div>' +
+            '<div class="sheet-sub">' + (list.length ? '共 ' + list.length + ' 条，点一条可以改或删' : '还没有提醒事项') + '</div>' +
+            '<div class="todo-list">' + list.map(function (t) {
+                return '<button class="todo-item" data-todo="' + t.id + '">' +
+                    '<span class="td-bell">🔔</span>' +
+                    '<span class="td-body"><b>' + esc(t.name) + '</b>' +
+                    '<span>' + esc(todoWhenText(t)) + '</span></span>' +
+                    '<span class="td-arrow">›</span></button>';
+            }).join('') + '</div>' +
+            '<button class="add-row" id="todoAdd">＋</button>';
+        $('sheetBody').dataset.id = '';
+        $('sheetBody').onclick = function (ev) {
+            var it = ev.target.closest('.todo-item');
+            if (it) { openTodoForm(it.dataset.todo); return; }
+            if (ev.target.id === 'todoAdd') openTodoForm('');
+        };
+        openSheet($('sheet'));
+    }
+
+    var todoCtx = null;     // 正在编辑的草稿
+
+    function openTodoForm(id) {
+        var t = id ? todoById(id) : null;
+        todoCtx = t
+            ? { id: t.id, name: t.name || '', mode: t.mode === 'week' ? 'week' : 'date',
+                date: t.date || '', days: (t.days || []).slice(),
+                time: t.time || '', desc: t.desc || '', files: (t.files || []).slice() }
+            : { id: '', name: '', mode: 'date', date: ymd(startOfDay(new Date())),
+                days: [], time: '', desc: '', files: [] };
+        attCtx = { files: todoCtx.files, redraw: function () { syncTodoForm(); drawTodoForm(); } };
+        drawTodoForm();
+    }
+
+    /** 重绘前把输入框里的值捞回来，不然切个模式就白填了 */
+    function syncTodoForm() {
+        if (!$('tdName')) return;
+        todoCtx.name = $('tdName').value;
+        todoCtx.time = $('tdTime').value;
+        todoCtx.desc = $('tdDesc').value;
+        if (todoCtx.mode === 'date' && $('tdDate')) todoCtx.date = $('tdDate').value;
+    }
+
+    function drawTodoForm() {
+        var r = semRange();
+        var isWeek = todoCtx.mode === 'week';
+        var morning = DB.settings.dailyTimes[0] || '08:00';
+        $('sheetBody').innerHTML =
+            '<div class="sheet-head"><span class="t">' + (todoCtx.id ? '编辑提醒事项' : '添加提醒事项') + '</span></div>' +
+            frow('事项名称 *', '<input type="text" id="tdName" value="' + esc(todoCtx.name) + '" placeholder="如：交实验报告">') +
+
+            '<div class="frow"><div class="flabel">提醒日期</div>' +
+            '<div class="quick-row" style="margin-top:0">' +
+            '<button class="quick' + (isWeek ? '' : ' on') + '" id="tdModeDate">指定某一天</button>' +
+            '<button class="quick' + (isWeek ? ' on' : '') + '" id="tdModeWeek">每周固定</button>' +
+            '</div>' +
+            (isWeek
+                ? '<div class="weeks-grid" style="margin-top:9px">' +
+                  [1, 2, 3, 4, 5, 6, 7].map(function (d) {
+                      return '<div class="wchip"' + (todoCtx.days.indexOf(d) >= 0 ? ' on' : '') +
+                          ' data-td="' + d + '">' + DAY_SINGLE[d] + '</div>';
+                  }).join('') + '</div>'
+                : '<input type="date" id="tdDate" value="' + (todoCtx.date || r.min) +
+                  '" min="' + r.min + '" max="' + r.max + '" style="margin-top:9px">') +
+            '</div>' +
+
+            frow('提醒时间（选填）', '<input type="time" id="tdTime" value="' + (todoCtx.time || '') + '">') +
+            frow('事项描述（选填）',
+                '<textarea id="tdDesc" class="note-ta" style="min-height:76px" ' +
+                'placeholder="要做什么，写清楚点">' + esc(todoCtx.desc) + '</textarea>') +
+            attEditorHtml() +
+            '<div class="hint-line">' + (todoCtx.time
+                ? '到那天 ' + esc(todoCtx.time) + ' 准时提醒，正文带描述和附件。'
+                : '没填时间的话，当天早上 ' + esc(morning) + ' 跟着课表一起提醒。') + '</div>' +
+
+            '<div class="form-actions">' +
+            '<button class="cancel" id="' + (todoCtx.id ? 'tdDel' : 'tdCancel') + '">' +
+            (todoCtx.id ? '删除' : '取消') + '</button>' +
+            '<button class="save" id="tdSave">保存</button></div>';
+
+        $('sheetBody').dataset.id = '';
+        $('sheetBody').onclick = function (ev) {
+            if (attClick(ev)) return;
+            var wc = ev.target.closest('.wchip[data-td]');
+            if (wc) {
+                syncTodoForm();
+                var d = +wc.dataset.td, i = todoCtx.days.indexOf(d);
+                if (i >= 0) todoCtx.days.splice(i, 1); else todoCtx.days.push(d);
+                drawTodoForm();
+                return;
+            }
+            if (ev.target.id === 'tdModeDate') { syncTodoForm(); todoCtx.mode = 'date'; drawTodoForm(); return; }
+            if (ev.target.id === 'tdModeWeek') { syncTodoForm(); todoCtx.mode = 'week'; drawTodoForm(); return; }
+            if (ev.target.id === 'tdCancel') { $('sheetBody').onclick = null; drawTodoList(); return; }
+            if (ev.target.id === 'tdDel') {
+                if (!confirm('删除提醒事项「' + todoCtx.name + '」？')) return;
+                DB.todos = DB.todos.filter(function (x) { return x.id !== todoCtx.id; });
+                save(); refresh(); scheduleAll();
+                $('sheetBody').onclick = null;
+                toast('已删除');
+                drawTodoList();
+                return;
+            }
+            if (ev.target.id === 'tdSave') saveTodoForm();
+        };
+        openSheet($('sheet'));
+    }
+
+    function saveTodoForm() {
+        syncTodoForm();
+        var name = todoCtx.name.trim();
+        if (!name) { toast('请填写事项名称'); return; }
+        if (todoCtx.mode === 'week' && !todoCtx.days.length) { toast('请至少选一个星期几'); return; }
+        if (todoCtx.mode === 'date' && !todoCtx.date) { toast('请选择日期'); return; }
+
+        var id = todoCtx.id || uid();
+        var obj = {
+            id: id, name: name, mode: todoCtx.mode,
+            date: todoCtx.mode === 'date' ? todoCtx.date : '',
+            days: todoCtx.mode === 'week' ? todoCtx.days.slice().sort() : [],
+            time: todoCtx.time || '', desc: todoCtx.desc.trim(), files: todoCtx.files
+        };
+        if (todoCtx.id) {
+            DB.todos = DB.todos.map(function (x) { return x.id === obj.id ? obj : x; });
+        } else {
+            DB.todos.push(obj);
+        }
+        save(); refresh(); scheduleAll();
+        $('sheetBody').onclick = null;
+        toast(todoCtx.id ? '已保存' : '已添加');
+        drawTodoList();
+    }
+
     /* ---------- 顶栏两个快捷菜单 ---------- */
 
     function sheetMenu(title, sub, items) {
@@ -2079,7 +2500,7 @@
         printHtml: function (kind) {
             return wrapPrint(kind === 'week' ? buildWeekPrint() : buildRawPrint());
         },
-        version: '1.0.9'
+        version: '1.1.2'
     };
 
     /* ------------------------------------------------------------------ 启动 */

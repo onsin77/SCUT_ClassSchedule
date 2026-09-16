@@ -79,6 +79,12 @@ function boot(nowMs, seedDb) {
         sectionOf: sectionOf, setCourseTag: setCourseTag,
         buildPlan: buildPlan, syncMsgs: syncMsgs,
         planImgs: function () { return planImgs; }, msgFiles: msgFiles,
+        pickFortune: pickFortune, FORTUNE_KIND: FORTUNE_KIND, FORTUNE_SET: FORTUNE_SET,
+        drawFortune: drawFortune, fortuneStreak: fortuneStreak, fortuneCounts: fortuneCounts,
+        fortuneDays: fortuneDays, fortuneLog: fortuneLog, drawFortuneSheet: drawFortuneSheet,
+        todoApplies: todoApplies, todoWhenText: todoWhenText, todoById: todoById,
+        setTodos: function (a) { DB.todos = a; },
+        setFortuneAll: function (v) { fortuneAll = v; },
         rawCourses: rawCourses, dayCourses: dayCourses, canSwap: canSwap,
         applySwap: applySwap, disableRange: disableRange, dayOverride: dayOverride,
         visibleDays: visibleDays, weekOf: weekOf, ymd: ymd,
@@ -111,7 +117,7 @@ function makeDB() {
     return {
         v: 1,
         meta: { student: '测试', sid: '', term: '', firstWeekMonday: '2026-08-31' },
-        colors: {}, marks: {}, days: {}, msgs: {},
+        colors: {}, marks: {}, days: {}, todos: [], msgs: {},
         entries: [
             e('a1', '工科数学分析(一)', '040101211', 1, 1, 2),
             e('a2', '工科数学分析(一)', '040101211', 5, 1, 2),
@@ -534,6 +540,250 @@ console.log('\n=== 13. 每日提醒分段 / 通知带附件 / 消息只留当天
     ok('每日提醒的 key 查不到附件', T2.msgFiles('d2026-09-14_0').length === 0);
 
     T.__restore(); T2.__restore();
+}
+
+console.log('\n=== 14. 每日运势 ===');
+{
+    // 用可控的 Math.random 验证级别与细分的边界
+    function withRandom(seq, fn) {
+        const real = Math.random;
+        let i = 0;
+        Math.random = () => seq[Math.min(i++, seq.length - 1)];
+        try { return fn(); } finally { Math.random = real; }
+    }
+
+    const T = boot(at(2026, 9, 16, 10, 0), makeDB());   // 2026-09-16 周三
+    const K = n => T.FORTUNE_KIND[n];
+
+    // (a) 级别概率的边界：20% 凶 / 35% 平 / 45% 吉
+    [[0.00, 'xiong'], [0.199, 'xiong'], [0.201, 'ping'], [0.549, 'ping'], [0.551, 'ji'], [0.999, 'ji']]
+        .forEach(([r, want]) => {
+            const got = K(withRandom([r, 0.5], () => T.pickFortune(false)));
+            ok('r=' + r + ' → ' + want, got === want, got);
+        });
+
+    // (b) 平的细分：大平/中平/小平 各 30%，一平如洗 10%
+    const pingR = r => withRandom([0.3, r], () => T.pickFortune(false));
+    ok('平 r=0.29 → 大平', pingR(0.29) === '大平');
+    ok('平 r=0.31 → 中平', pingR(0.31) === '中平');
+    ok('平 r=0.61 → 小平', pingR(0.61) === '小平');
+    ok('平 r=0.91 → 一平如洗', pingR(0.91) === '一平如洗');
+
+    // (c) 吉的细分：大/中/小吉 各 30%，剩下 10% 三等分给三个彩蛋
+    const jiR = r => withRandom([0.8, r], () => T.pickFortune(false));
+    ok('吉 r=0.29 → 大吉', jiR(0.29) === '大吉');
+    ok('吉 r=0.61 → 小吉', jiR(0.61) === '小吉');
+    ok('吉 r=0.91 → 桃花运', jiR(0.91) === '桃花运');
+    ok('吉 r=0.95 → 天选之子', jiR(0.95) === '天选之子');
+    ok('吉 r=0.98 → 王马小吉', jiR(0.98) === '王马小吉');
+
+    // (d) 昨天中过凶：今天一定不出凶（平/吉 按 35:45 归一，界在 0.4375）
+    [0.0, 0.2, 0.43, 0.44, 0.9, 0.999].forEach(r => {
+        const got = K(withRandom([r, 0.5], () => T.pickFortune(true)));
+        ok('昨天凶时 r=' + r + ' 不出凶', got !== 'xiong', got);
+    });
+    ok('昨天凶时 r=0.43 → 平', K(withRandom([0.43, 0.5], () => T.pickFortune(true))) === 'ping');
+    ok('昨天凶时 r=0.45 → 吉', K(withRandom([0.45, 0.5], () => T.pickFortune(true))) === 'ji');
+
+    // (e) 整体分布（跑 4000 次看大数）
+    let c = { xiong: 0, ping: 0, ji: 0 };
+    for (let i = 0; i < 4000; i++) c[K(T.pickFortune(false))]++;
+    ok('凶 ≈ 20%', Math.abs(c.xiong / 4000 - 0.20) < 0.03, (c.xiong / 40).toFixed(1) + '%');
+    ok('平 ≈ 35%', Math.abs(c.ping / 4000 - 0.35) < 0.035, (c.ping / 40).toFixed(1) + '%');
+    ok('吉 ≈ 45%', Math.abs(c.ji / 4000 - 0.45) < 0.035, (c.ji / 40).toFixed(1) + '%');
+    T.__restore();
+}
+{
+    // 连续 / 断签
+    const d1 = makeDB();
+    d1.fortune = { log: { '2026-09-14': '大吉', '2026-09-15': '中平' } };
+    const T1 = boot(at(2026, 9, 16, 10, 0), d1);
+    ok('抽之前连续 2 天', T1.fortuneStreak() === 2, T1.fortuneStreak());
+    ok('drawFortune 返回 true 表示这次真的抽了', T1.drawFortune() === true);
+    ok('抽完连续 3 天', T1.fortuneStreak() === 3, T1.fortuneStreak());
+    const first = T1.fortuneLog()['2026-09-16'];
+    ok('同一天再抽不会变', T1.drawFortune() === false && T1.fortuneLog()['2026-09-16'] === first, first);
+
+    // 昨天没抽 → 断签，旧的清空
+    const d2 = makeDB();
+    d2.fortune = { log: { '2026-09-10': '大吉', '2026-09-11': '大吉', '2026-09-12': '小吉' } };
+    const T2 = boot(at(2026, 9, 16, 10, 0), d2);
+    T2.drawFortune();
+    const ks = Object.keys(T2.fortuneLog());
+    ok('断签后旧记录被清空，只剩今天', ks.length === 1 && ks[0] === '2026-09-16', ks.join(','));
+    ok('断签后连续天数回到 1', T2.fortuneStreak() === 1, T2.fortuneStreak());
+    T1.__restore(); T2.__restore();
+}
+{
+    // 次数统计：没抽到过的不显示（界面按 >0 过滤）
+    const d = makeDB();
+    d.fortune = { log: { '2026-09-16': '大吉', '2026-09-15': '大吉', '2026-09-14': '一平如洗' } };
+    const T = boot(at(2026, 9, 16, 10, 0), d);
+    const c = T.fortuneCounts();
+    ok('大吉 ×2', c['大吉'] === 2, c['大吉']);
+    ok('一平如洗 ×1', c['一平如洗'] === 1);
+    ok('没抽到过的都是 0', c['大凶'] === 0 && c['天选之子'] === 0 && c['王马小吉'] === 0);
+    ok('统计表覆盖全部 13 种运势', Object.keys(c).length === 13, Object.keys(c).length);
+    ok('趋势按日期倒序', T.fortuneDays()[0] === '2026-09-16', T.fortuneDays().join(','));
+    T.__restore();
+}
+
+console.log('\n=== 15. 运势弹层渲染 ===');
+{
+    // 造 9 天连续记录（都是今天往回数），今天是大吉
+    const names = ['大吉', '大吉', '中平', '小凶', '一平如洗', '桃花运', '大吉', '中吉', '小吉'];
+    const log = {};
+    const ds = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
+        String(d.getDate()).padStart(2, '0');
+    names.forEach((n, i) => { log[ds(new RealDate(2026, 8, 16 - i))] = n; });
+    const db = makeDB();
+    db.fortune = { log: log };
+    const T = boot(at(2026, 9, 16, 10, 0), db);
+    T.drawFortuneSheet();
+    let h = T.html('sheetBody');
+
+    ok('主角显示今天抽中的大吉', h.indexOf('ft-name ft-ji') > 0 && h.indexOf('>大吉<') > 0);
+    ok('显示连续 9 天', h.indexOf('已连续抽运 <b>9</b> 天') > 0);
+    ok('默认只列最近 7 天', (h.match(/class="ft-row"/g) || []).length === 7,
+        (h.match(/class="ft-row"/g) || []).length);
+    ok('有「查看全部趋势」按钮', h.indexOf('查看全部趋势（共 9 天）') > 0);
+    ok('抽到过的大吉显示 ×3', h.indexOf('大吉 ×3') > 0);
+    ok('没抽到过的运势隐藏', h.indexOf('大凶') < 0 && h.indexOf('王马小吉') < 0 && h.indexOf('天选之子') < 0);
+    ok('吉是金色、凶是灰色', h.indexOf('ft-val ft-ji') > 0 && h.indexOf('ft-val ft-xiong') > 0);
+
+    T.setFortuneAll(true);
+    T.drawFortuneSheet();
+    h = T.html('sheetBody');
+    ok('切到全部趋势列出 9 行', (h.match(/class="ft-row"/g) || []).length === 9,
+        (h.match(/class="ft-row"/g) || []).length);
+    ok('全部趋势里有「只看最近 7 天」', h.indexOf('只看最近 7 天') > 0);
+    T.__restore();
+}
+{
+    // 凶的小字：平时「日行一善」，周四「vivo50」
+    const d1 = makeDB();
+    d1.fortune = { log: { '2026-09-16': '小凶' } };        // 2026-09-16 是周三
+    const T1 = boot(at(2026, 9, 16, 10, 0), d1);
+    T1.drawFortuneSheet();
+    const h1 = T1.html('sheetBody');
+    ok('周三中凶显示「日行一善即可消灾」', h1.indexOf('日行一善即可消灾') > 0);
+    ok('周三不显示 vivo50', h1.indexOf('vivo50') < 0);
+
+    const d2 = makeDB();
+    d2.fortune = { log: { '2026-09-17': '大凶' } };        // 2026-09-17 是周四
+    const T2 = boot(at(2026, 9, 17, 10, 0), d2);
+    T2.drawFortuneSheet();
+    const h2 = T2.html('sheetBody');
+    ok('周四中凶显示「vivo50即可消灾」', h2.indexOf('vivo50即可消灾') > 0);
+    ok('周四不再显示「日行一善」', h2.indexOf('日行一善') < 0);
+
+    // 平/吉不该有小字
+    const d3 = makeDB();
+    d3.fortune = { log: { '2026-09-16': '中平' } };
+    const T3 = boot(at(2026, 9, 16, 10, 0), d3);
+    T3.drawFortuneSheet();
+    const h3 = T3.html('sheetBody');
+    ok('平没有消灾小字', h3.indexOf('消灾') < 0);
+
+    T1.__restore(); T2.__restore(); T3.__restore();
+}
+
+console.log('\n=== 16. 提醒事项：通知计划 ===');
+{
+    const db = makeDB();
+    db.todos = [
+        { id: 'T1', name: '交实验报告', mode: 'date', date: '2026-09-14', days: [],
+          time: '13:00', desc: '记得带纸质版', files: [
+            { n: '报告.png', t: 'image/png', d: 'data:image/png;base64,AAAA', tn: 'data:image/jpeg;base64,BBBB' },
+            { n: '要求.pdf', t: 'application/pdf', d: 'data:application/pdf;base64,CCCC' }] },
+        { id: 'T2', name: '还书', mode: 'date', date: '2026-09-15', days: [], time: '', desc: '', files: [] },
+        { id: 'T3', name: '每周例会', mode: 'week', date: '', days: [1, 3], time: '09:30', desc: '', files: [] }
+    ];
+    const T = boot(at(2026, 9, 14, 6, 0), db);       // 周一早上 6 点
+    const plan = T.buildPlan();
+
+    const k1 = 't2026-09-14_T1';
+    ok('日期+时间：按时排到了计划里', !!plan[k1] && plan[k1].at === at(2026, 9, 14, 13, 0),
+        plan[k1] && new RealDate(plan[k1].at).toTimeString().slice(0, 5));
+    ok('标题带铃铛和事项名', plan[k1].title === '🔔 交实验报告', plan[k1].title);
+    ok('正文含描述', plan[k1].body.indexOf('记得带纸质版') >= 0, JSON.stringify(plan[k1].body));
+    ok('正文列出附件名', plan[k1].body.indexOf('报告.png') > 0 && plan[k1].body.indexOf('要求.pdf') > 0,
+        plan[k1].body.split('\n').pop());
+    ok('挂了通知大图的 key', /^i/.test(plan[k1].img || ''), plan[k1].img);
+    ok('图片用的是缩略图 tn', T.planImgs()[plan[k1].img] === 'data:image/jpeg;base64,BBBB');
+
+    const k2 = 't2026-09-15_T2';
+    ok('只填日期：跟早课表同一时刻（08:00）', !!plan[k2] && plan[k2].at === at(2026, 9, 15, 8, 0),
+        plan[k2] && new RealDate(plan[k2].at).toTimeString().slice(0, 5));
+    ok('没描述时给个兜底正文', plan[k2].body === '到点啦', plan[k2].body);
+
+    const wk = Object.keys(plan).filter(k => /^t.*_T3$/.test(k)).sort();
+    ok('每周一三：21 天里排到了该有的次数', wk.length === 6, wk.join(','));
+    ok('每周那条只落在周一和周三',
+        wk.every(k => [1, 3].indexOf(new RealDate(k.slice(1, 11).replace(/-/g, '/')).getDay()) >= 0),
+        wk.join(','));
+    ok('每周那条的时间是 09:30',
+        wk.every(k => new RealDate(plan[k].at).getHours() === 9 && new RealDate(plan[k].at).getMinutes() === 30));
+    T.__restore();
+}
+{
+    // 停课的日子：课程提醒不发，但提醒事项照发
+    const db = makeDB();
+    db.days = { '2026-09-14': { off: true } };
+    db.todos = [{ id: 'T1', name: '交表', mode: 'date', date: '2026-09-14', days: [], time: '10:00', desc: '', files: [] }];
+    const T = boot(at(2026, 9, 14, 6, 0), db);
+    const plan = T.buildPlan();
+    ok('停课那天不推课程提醒', !Object.keys(plan).some(k => k[0] === 'p' && k.indexOf('2026-09-14') > 0));
+    ok('停课但有提醒事项 → 照样提醒', !!plan['t2026-09-14_T1']);
+    T.__restore();
+}
+{
+    // 从消息 key 反查提醒事项的附件
+    const db = makeDB();
+    db.todos = [{ id: 'T1', name: '交报告', mode: 'date', date: '2026-09-14', days: [], time: '10:00',
+        desc: '', files: [{ n: 'x.png', t: 'image/png', d: 'data:image/png;base64,AAA' }] }];
+    const T = boot(at(2026, 9, 14, 6, 0), db);
+    ok('消息 key → 查得到提醒事项的附件', T.msgFiles('t2026-09-14_T1').length === 1,
+        JSON.stringify(T.msgFiles('t2026-09-14_T1').map ? T.msgFiles('t2026-09-14_T1').map(f => f.n) : null));
+    ok('别的 key 查不到', T.msgFiles('d2026-09-14_0').length === 0);
+    T.__restore();
+}
+
+console.log('\n=== 17. 提醒事项：课表上的标记 ===');
+{
+    const db = makeDB();
+    db.todos = [
+        { id: 'A', name: '只有日期', mode: 'date', date: '2026-09-14', days: [], time: '', desc: '', files: [] },
+        { id: 'B', name: '那点有课', mode: 'date', date: '2026-09-14', days: [], time: '09:00', desc: '', files: [] },
+        { id: 'C', name: '那点没课', mode: 'date', date: '2026-09-14', days: [], time: '13:00', desc: '', files: [] }
+    ];
+    const T = boot(at(2026, 9, 14, 6, 0), db);
+    T.refresh();
+    const head = T.html('kbDays'), body = T.html('kbBlocks');
+    const cnt = (s, re) => (s.match(re) || []).length;
+
+    ok('只有日期 → 表头出现小铃铛', cnt(head, /class="kb-todo"/g) === 1, cnt(head, /class="kb-todo"/g));
+    ok('铃铛只在周一那一格',
+        /data-date="2026-09-14">\s*<i class="kb-todo"/.test(head.replace(/\n/g, '')) === false ?
+        head.indexOf('kb-todo') < head.indexOf('2026-09-15') : true);
+
+    ok('那一刻有课 → 课块挂上 🔔', /class="bmark">🔔/.test(body), (body.match(/class="bmark">[^<]*/g) || []).join(' | '));
+    ok('那一刻没课 → 画了一条小标', cnt(body, /class="kb-todochip"/g) === 1, cnt(body, /class="kb-todochip"/g));
+    ok('小标上写着时间和小事项名', /class="kb-todochip"[^>]*>🔔 13:00 那点没课</.test(body),
+        (body.match(/class="kb-todochip"[^>]*>([^<]*)/) || [])[1]);
+    ok('有课那条不再另外画小标', body.indexOf('09:00 那点有课') < 0);
+    T.__restore();
+}
+{
+    // 每周固定的提醒：每一周都要能匹配上
+    const db = makeDB();
+    db.todos = [{ id: 'W', name: '周三晚自习', mode: 'week', date: '', days: [3], time: '', desc: '', files: [] }];
+    const T = boot(at(2026, 9, 14, 6, 0), db);
+    T.refresh();
+    ok('每周三 → 表头周三那格有铃铛',
+        /data-date="2026-09-16">\s*<i class="kb-todo"/.test(T.html('kbDays').replace(/\n/g, '')) ||
+        T.html('kbDays').indexOf('kb-todo') > 0);
+    T.__restore();
 }
 
 console.log('\n' + (fails ? '✗ ' + fails + ' 项失败' : '✓ 全部通过') + '\n');

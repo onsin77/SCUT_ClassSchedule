@@ -77,8 +77,8 @@ echo "[2/8] aapt2 link 生成 base.apk + R.java"
   --java "$B/gen" \
   --min-sdk-version 26 \
   --target-sdk-version 34 \
-  --version-code 13 \
-  --version-name "1.0.9" \
+  --version-code 16 \
+  --version-name "1.1.2" \
   --auto-add-overlay
 
 echo "[3/8] javac 编译 Java 源码"

@@ -1,11 +1,13 @@
 package com.scut.kcb;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.AlarmManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -25,6 +27,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
+import android.webkit.JsResult;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -108,7 +111,47 @@ public class MainActivity extends Activity {
         s.setTextZoom(100);
         web.setBackgroundColor(0xFFF4F6F9);
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        web.setWebChromeClient(new WebChromeClient());
+        // 系统默认的 alert/confirm 标题是「网址为"file://"的网页显示：」，太难看了，
+        // 换成 App 自己的标题和按钮文案
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onJsConfirm(WebView v, String url, String message, final JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("华工课程表")
+                        .setMessage(message)
+                        .setNegativeButton("取消", new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface d, int w) {
+                                result.cancel();
+                            }
+                        })
+                        .setPositiveButton("确定", new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface d, int w) {
+                                result.confirm();
+                            }
+                        })
+                        .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                            public void onCancel(DialogInterface d) {
+                                result.cancel();
+                            }
+                        })
+                        .show();
+                return true;
+            }
+
+            @Override
+            public boolean onJsAlert(WebView v, String url, String message, final JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("华工课程表")
+                        .setMessage(message)
+                        .setPositiveButton("知道了", new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface d, int w) {
+                                result.confirm();
+                            }
+                        })
+                        .show();
+                return true;
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView v, String url) {
@@ -1037,6 +1080,18 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void schedule(String json, String imgs) {
             applySchedule(json, imgs);
+        }
+
+        /** 外部链接（GitHub / 网盘 / 邮箱）交给系统里对应的 App 打开 */
+        @JavascriptInterface
+        public void openUrl(String url) {
+            final String u = (url == null) ? "" : url.trim();
+            if (u.isEmpty()) return;
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(u)));
+            } catch (Exception e) {
+                toast("没有能打开这个链接的应用");
+            }
         }
 
         @JavascriptInterface
