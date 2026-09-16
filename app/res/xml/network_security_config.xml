@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  教务系统是明文 http，Android 9+ 默认禁止明文流量，不配这个 WebView 会直接白屏。
+  CAS 登录页是 https，走默认策略即可。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">jw.scut.edu.cn</domain>
+        <domain includeSubdomains="true">scut.edu.cn</domain>
+        <domain includeSubdomains="true">xsjw2018.jw.scut.edu.cn</domain>
+    </domain-config>
+</network-security-config>

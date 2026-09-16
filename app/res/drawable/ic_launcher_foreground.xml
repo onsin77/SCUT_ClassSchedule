@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 课表外框 -->
+    <path
+        android:pathData="M30,30 L78,30 A5,5 0 0 1 83,35 L83,78 A5,5 0 0 1 78,83 L30,83 A5,5 0 0 1 25,78 L25,35 A5,5 0 0 1 30,30 Z"
+        android:fillColor="#FFFFFF" />
+    <path
+        android:pathData="M31,32 L77,32 A4,4 0 0 1 81,36 L81,77 A4,4 0 0 1 77,81 L31,81 A4,4 0 0 1 27,77 L27,36 A4,4 0 0 1 31,32 Z"
+        android:fillColor="#1F5FD0" />
+
+    <!-- 表头 -->
+    <path
+        android:pathData="M28,43 L80,43 L80,38 A3,3 0 0 0 77,35 L31,35 A3,3 0 0 0 28,38 Z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- 网格线 -->
+    <path android:pathData="M28,43 L80,43" android:strokeColor="#1F5FD0" android:strokeWidth="1.2" />
+    <path android:pathData="M41,43 L41,80" android:strokeColor="#7FA8E8" android:strokeWidth="1.2" />
+    <path android:pathData="M54,43 L54,80" android:strokeColor="#7FA8E8" android:strokeWidth="1.2" />
+    <path android:pathData="M67,43 L67,80" android:strokeColor="#7FA8E8" android:strokeWidth="1.2" />
+    <path android:pathData="M28,55 L80,55" android:strokeColor="#7FA8E8" android:strokeWidth="1.2" />
+    <path android:pathData="M28,67 L80,67" android:strokeColor="#7FA8E8" android:strokeWidth="1.2" />
+
+    <!-- 高亮课程块 -->
+    <path android:pathData="M43,45 L52,45 L52,53 L43,53 Z" android:fillColor="#FFD34D" />
+    <path android:pathData="M69,57 L78,57 L78,65 L69,65 Z" android:fillColor="#7FE0A8" />
+</vector>

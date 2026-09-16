@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>华工课程表</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ===================== 顶部栏 ===================== -->
+  <header class="topbar">
+    <div class="tb-left">
+      <button class="tb-back" id="tbBack" hidden>‹</button>
+      <span id="tbTitle">课表</span>
+    </div>
+    <div class="tb-right">
+      <button class="icon-btn" id="btnRaw" title="详细原始课表">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h11"/><circle cx="19" cy="18" r="1.6"/></svg>
+      </button>
+      <button class="icon-btn" id="btnAdd" title="导入 / 添加课程">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button class="icon-btn" id="btnExport" title="导出">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M4 17.5V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1.5"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ===================== 1. 课表（左右滑动换周） ===================== -->
+  <main class="page active" id="page-kb">
+    <div class="weekbar">
+      <button class="nav-btn" id="wkPrev">‹</button>
+      <div class="weekbar-center">
+        <div class="wk-title" id="wkTitle">第 1 周</div>
+        <div class="wk-range" id="wkRange">—</div>
+      </div>
+      <button class="nav-btn" id="wkNext">›</button>
+      <button class="wk-now" id="wkNow" hidden>回到本周</button>
+    </div>
+
+    <div class="kb-wrap" id="kbWrap">
+      <div class="kb-days" id="kbDays"></div>
+      <div class="kb-body" id="kbBody">
+        <div class="kb-times" id="kbTimes"></div>
+        <div class="kb-canvas" id="kbCanvas">
+          <div class="kb-gridlines" id="kbLines"></div>
+          <div class="kb-blocks" id="kbBlocks"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="empty-hint" id="kbEmpty" hidden>
+      本周没有课程<br>
+      <span class="dim">点右上角 ＋ 导入课表，或手动添加</span>
+    </div>
+    <div class="swipe-hint" id="swipeHint">左右滑动可切换周次</div>
+  </main>
+
+  <!-- ===================== 2. 消息中心 ===================== -->
+  <main class="page" id="page-msg">
+    <div class="msg-head">
+      <div class="mh-title">消息中心</div>
+      <div class="mh-sub" id="msgSub">—</div>
+    </div>
+    <div id="msgList" class="msg-list"></div>
+    <div class="empty-hint" id="msgEmpty" hidden>
+      还没有消息<br>
+      <span class="dim">每日课表和课前提醒都会自动记在这里</span>
+    </div>
+  </main>
+
+  <!-- ===================== 3. 原始表（从顶栏进入） ===================== -->
+  <main class="page" id="page-raw">
+    <div class="toolbar">
+      <button class="tb-btn primary" id="rawAdd">+ 添加课程</button>
+      <button class="tb-btn" id="rawImport">导入 PDF</button>
+      <button class="tb-btn" id="rawWeb">网页导入</button>
+      <button class="tb-btn" id="rawExport">导出详细课表 PDF</button>
+    </div>
+    <div class="meta-card" id="rawMeta"></div>
+    <div id="rawList" class="card-list"></div>
+    <div class="empty-hint" id="rawEmpty" hidden>
+      还没有课程数据<br>
+      <span class="dim">可以导入课表 PDF / 网页导入，或手动添加</span>
+    </div>
+  </main>
+
+  <!-- ===================== 4. 更多 ===================== -->
+  <main class="page" id="page-more">
+    <div class="more-list">
+      <button class="more-item" id="moreSwap">
+        <span class="mi-icon">🔁</span>
+        <span class="mi-body"><b>调休</b><span>放假停课，把某天的课挪到另一天</span></span>
+        <span class="mi-arrow">›</span>
+      </button>
+    </div>
+  </main>
+
+  <!-- ===================== 5. 设置 ===================== -->
+  <main class="page" id="page-set">
+    <section class="set-group">
+      <h3>学期</h3>
+      <div class="row">
+        <label>第 1 周星期一</label>
+        <input type="date" id="setFirstWeek">
+      </div>
+      <div class="row">
+        <label>本学期总周数</label>
+        <input type="number" id="setTotalWeeks" min="1" max="30" step="1" style="width:72px">
+      </div>
+      <div class="row">
+        <label>每天节数</label>
+        <select id="setPeriods">
+          <option value="11">11 节</option>
+          <option value="12">12 节</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>作息时间</label>
+        <select id="setTimetable">
+          <option value="dxc">大学城 / 国际校区</option>
+          <option value="ws">五山校区</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>显示周末</label>
+        <select id="setWeekend">
+          <option value="auto">自动（有课才显示）</option>
+          <option value="always">始终显示</option>
+          <option value="never">不显示</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="set-group">
+      <h3>通知权限</h3>
+      <div class="row">
+        <label>通知</label>
+        <button class="tb-btn" id="setNotif">检查 / 开启</button>
+      </div>
+      <div class="row">
+        <label>精确闹钟</label>
+        <button class="tb-btn" id="setExact">检查 / 开启</button>
+      </div>
+    </section>
+
+    <section class="set-group">
+      <h3>每日课表提醒</h3>
+      <div class="row">
+        <label>开启</label>
+        <switch id="setDailyOn"></switch>
+      </div>
+      <div class="row">
+        <label>早上（整天课表）</label>
+        <input type="time" id="setDaily1">
+      </div>
+      <div class="row">
+        <label>下午</label>
+        <input type="time" id="setDaily2">
+      </div>
+      <div class="row">
+        <label>晚上</label>
+        <input type="time" id="setDaily3">
+      </div>
+      <div class="row">
+        <label>没课的日子也提醒</label>
+        <switch id="setDailyEmpty"></switch>
+      </div>
+      <div class="set-note">下午和晚上只提醒那个时间段的课；那一段没课就不会打扰。早上那条会列出全天的课。</div>
+    </section>
+
+    <section class="set-group">
+      <h3>课前提醒</h3>
+      <div class="row">
+        <label>开启</label>
+        <switch id="setPreOn"></switch>
+      </div>
+      <div class="row">
+        <label>提前时间</label>
+        <select id="setPreMin">
+          <option value="5">5 分钟</option>
+          <option value="10">10 分钟</option>
+          <option value="15">15 分钟</option>
+          <option value="20">20 分钟</option>
+          <option value="30">30 分钟</option>
+          <option value="45">45 分钟</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>普通课也提醒</label>
+        <switch id="setNotifyNormal"></switch>
+      </div>
+      <div class="row">
+        <label>水课也提醒</label>
+        <switch id="setNotifyEasy"></switch>
+      </div>
+    </section>
+
+    <section class="set-group">
+      <h3>签到</h3>
+      <div class="row">
+        <label>开启签到标记</label>
+        <switch id="setSignOn"></switch>
+      </div>
+    </section>
+
+    <section class="set-group">
+      <h3>提醒与消息</h3>
+      <div class="row"><button class="tb-btn block" id="setReschedule">重新排定全部提醒</button></div>
+      <div class="row"><button class="tb-btn block" id="setClearMsg">清空消息中心</button></div>
+    </section>
+
+    <section class="set-group">
+      <h3>帮助</h3>
+      <div class="row">
+        <div class="help-intro">每个功能怎么用，看这里</div>
+        <button class="tb-btn" id="setHelp">查看帮助</button>
+      </div>
+    </section>
+
+    <section class="set-group">
+      <h3>数据</h3>
+      <div class="row"><button class="tb-btn block danger" id="setClear">清空全部数据</button></div>
+    </section>
+
+    <div class="set-footer">
+      华工课程表 v1.0.9 · 数据仅保存在本机<br>
+      <span class="dim">课表来源：华南理工大学教务系统（大学城校区）</span>
+      <div class="credit">
+        本软件由2026级AI先进技术拔尖5班wzk开发，如有任何意见请务必反馈qq：2013549019，感谢您对本项目的贡献！
+      </div>
+    </div>
+  </main>
+
+  <!-- ===================== 底部导航 ===================== -->
+  <nav class="tabbar">
+    <button class="tab active" data-tab="kb">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 4v3M16 4v3"/><path d="M7.5 13h3v3h-3z"/></svg>
+      <span>课表</span>
+    </button>
+    <button class="tab" data-tab="msg">
+      <svg viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5z"/><path d="M8 10h8M8 14h5"/></svg>
+      <span>消息</span>
+      <i class="dot" id="msgDot" hidden></i>
+    </button>
+    <button class="tab" data-tab="more">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+      <span>更多</span>
+    </button>
+    <button class="tab" data-tab="set">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.6M12 18.4V21M3 12h2.6M18.4 12H21M5.6 5.6l1.9 1.9M16.5 16.5l1.9 1.9M18.4 5.6l-1.9 1.9M7.5 16.5l-1.9 1.9"/></svg>
+      <span>设置</span>
+    </button>
+  </nav>
+
+  <!-- ===================== 弹层 ===================== -->
+  <div class="sheet-mask" id="sheetMask" hidden></div>
+  <div class="sheet" id="sheet" hidden>
+    <div class="sheet-grab" id="sheetGrab">
+      <div class="sheet-handle"></div>
+    </div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+
+  <div class="sheet-mask" id="editMask" hidden></div>
+  <div class="sheet tall" id="editSheet" hidden>
+    <div class="sheet-grab" id="editGrab">
+      <div class="sheet-handle"></div>
+    </div>
+    <div class="sheet-title" id="editTitle">添加课程</div>
+    <div class="sheet-body form" id="editBody"></div>
+  </div>
+
+  <!-- 附件图片全屏预览 -->
+  <div class="viewer" id="viewer" hidden>
+    <button class="viewer-x" id="viewerX">✕</button>
+    <img id="viewerImg" alt="附件图片">
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <div class="loading" id="loading" hidden><div class="spin"></div><span id="loadingText">处理中…</span></div>
+</div>
+
+<script src="kbpdf.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
