@@ -1,3 +1,18 @@
+# ---- 构建中间产物（tools/build.sh 每次都会重建）----
 build/
-*.idsig
+
+# ---- 签名密钥 ----
+# 千万别提交：一旦公开，任何人都能签出「你的」安装包，用来冒充更新。
+# 需要自己出包的话，用 keytool 生成一份新的放进 tools/。
+tools/keystore.jks
+
+# ---- 本地预览 / 调试用的临时页 ----
+app/assets/www/_*.html
+
+# ---- 系统与编辑器 ----
+.DS_Store
+Thumbs.db
 __pycache__/
+*.pyc
+.idea/
+.vscode/

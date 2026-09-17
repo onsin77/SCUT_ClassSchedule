@@ -111,8 +111,15 @@ html, body {
 .kb-daycell.today { background: var(--brand-soft); border-radius: 10px 10px 0 0; }
 .kb-spacer { width: var(--time-col); flex: none; }
 
-.kb-body { flex: 1; display: flex; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
-.kb-times { width: var(--time-col); flex: none; }
+/* 注意：这一层**故意不用 flex**。
+   原来写成 display:flex + .kb-canvas{flex:1}，在个别机型（实测荣耀某机型的 WebView）上
+   那个 flex 子项会被算成 0 宽 —— 结果课块全挤成一条竖线、网格线也跟着消失。
+   改成「滚动容器 + 左侧时间列绝对定位 + 画布 margin-left」，用的都是最基本的块级布局。 */
+.kb-body {
+    flex: 1; position: relative;
+    overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+}
+.kb-times { position: absolute; left: 0; top: 0; width: var(--time-col); }
 /* 节次和时间同排一行、贴在格子顶部 —— 格子顶边就是这节课的开始时刻 */
 .kb-timecell {
     height: var(--row-h); position: relative;
@@ -130,8 +137,9 @@ html, body {
     font-size: 10px; color: #8B95A3; letter-spacing: .5px;
 }
 
-.kb-canvas { flex: 1; position: relative; }
-.kb-gridlines { position: absolute; inset: 0; }
+/* 高度由 JS 按节数算好写进来，所以这里是块级元素也有确定尺寸 */
+.kb-canvas { position: relative; margin-left: var(--time-col); }
+.kb-gridlines { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
 .kb-gridlines i {
     position: absolute; left: 0; right: 0; height: 1px; background: var(--line);
 }
@@ -142,7 +150,7 @@ html, body {
     position: absolute; top: 0; bottom: 0; width: 1px; background: #EFF2F6;
 }
 
-.kb-blocks { position: absolute; inset: 0; }
+.kb-blocks { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
 
 /* 提醒事项里「有具体时间、但那个时刻没课」的：在那一刻画一条小标 */
 .kb-todochip {
@@ -432,7 +440,7 @@ switch[on]::after { transform: translateX(19px); }
 
 /* ---------------- 弹层 ---------------- */
 .sheet-mask {
-    position: fixed; inset: 0; background: rgba(15,22,35,.42); z-index: 50;
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(15,22,35,.42); z-index: 50;
     animation: fade .16s ease;
 }
 .sheet {
@@ -524,7 +532,7 @@ switch[on]::after { transform: translateX(19px); }
 .att-empty { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
 
 .viewer {
-    position: fixed; inset: 0; z-index: 99; background: rgba(12,16,22,.94);
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 99; background: rgba(12,16,22,.94);
     display: flex; align-items: center; justify-content: center; padding: 14px;
 }
 .viewer img { max-width: 100%; max-height: 100%; object-fit: contain; }
@@ -542,7 +550,7 @@ switch[on]::after { transform: translateX(19px); }
     max-width: 84%; text-align: center; animation: fade .15s ease;
 }
 .loading {
-    position: fixed; inset: 0; background: rgba(255,255,255,.72); z-index: 95;
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(255,255,255,.72); z-index: 95;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
     font-size: 13.5px; color: #5E6674;
 }

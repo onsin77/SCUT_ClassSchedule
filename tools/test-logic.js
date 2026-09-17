@@ -25,7 +25,7 @@ function at(y, m, d, hh, mm) { return new RealDate(y, m - 1, d, hh, mm, 0, 0).ge
 function fakeEl() {
     const o = {
         style: {}, dataset: {}, hidden: false, innerHTML: '', textContent: '', value: '',
-        scrollTop: 0, scrollHeight: 100, offsetHeight: 800, offsetWidth: 400,
+        scrollTop: 0, scrollHeight: 100, offsetHeight: 800, offsetWidth: 400, clientWidth: 400,
         classList: { add() { }, remove() { }, toggle() { }, contains() { return false; } }
     };
     ['addEventListener', 'removeEventListener', 'appendChild', 'removeChild', 'setAttribute',
@@ -100,6 +100,7 @@ function boot(nowMs, seedDb) {
 
     const T = win.__T;
     T.html = id => el(id).innerHTML;      // 读回某个元素被渲染成的 HTML
+    T.els = () => els;                    // 拿到假 DOM 的元素：能改尺寸、能查行内样式
     T.__restore = function () {
         global.Date = RealDate;
         global.window = prev.window;
@@ -326,8 +327,8 @@ console.log('\n=== 10. 消息中心不会攒重复消息 ===');
         old2: { at: t, title: 'T', body: 'B', kind: 'preclass', read: true },
         other: { at: t + 60000, title: 'T2', body: 'B2', kind: 'daily', read: false }
     };
-    const T = boot(at(2026, 9, 14, 7, 0), db);
-    const g = T.getDB();
+    const T = boot(at(2026, 9, 15, 12, 0), db);   // 「现在」放在三条消息之后：
+    const g = T.getDB();                          // 它们是历史，不会被「计划里没有」那条规则清掉
     T.syncMsgs({});
     const keys = Object.keys(g.msgs);
     ok('内容相同的旧消息被合并成一条', keys.length === 2, keys.join(','));
@@ -783,6 +784,61 @@ console.log('\n=== 17. 提醒事项：课表上的标记 ===');
     ok('每周三 → 表头周三那格有铃铛',
         /data-date="2026-09-16">\s*<i class="kb-todo"/.test(T.html('kbDays').replace(/\n/g, '')) ||
         T.html('kbDays').indexOf('kb-todo') > 0);
+    T.__restore();
+}
+
+console.log('\n=== 18. 消息中心：计划里已经没了的「幽灵消息」要清掉 ===');
+{
+    const db = makeDB();
+    const now = at(2026, 9, 17, 8, 30);          // 9/17 周四 08:30
+    db.msgs = {
+        // 还没到点，但对应的提醒事项已经被删了 —— 永远不会响
+        't2026-09-17_ghost': { at: at(2026, 9, 17, 10, 0), title: '🔔 X', body: '到点啦', kind: 'preclass', read: true },
+        // 已经响过的历史（buildPlan 不会再产出它，因为时间已经过了）
+        'p2026-09-17_old': { at: at(2026, 9, 17, 8, 0), title: '响过的', body: 'x', kind: 'preclass', read: true },
+        // 计划里还在的
+        'd2026-09-18_0': { at: at(2026, 9, 18, 8, 0), title: '明天的', body: 'y', kind: 'daily', read: false }
+    };
+    const T = boot(now, db);
+    const plan = T.buildPlan();
+    ok('计划里确实有明早那条', !!plan['d2026-09-18_0']);
+    ok('计划里没有那条幽灵', !plan['t2026-09-17_ghost']);
+
+    T.syncMsgs(plan);
+    const ks = Object.keys(T.getDB().msgs);
+    ok('未到点 + 计划里没了 → 清掉', ks.indexOf('t2026-09-17_ghost') < 0, ks.join(','));
+    ok('已经响过的历史要留着', ks.indexOf('p2026-09-17_old') >= 0);
+    ok('计划里还在的要留着', ks.indexOf('d2026-09-18_0') >= 0);
+    T.__restore();
+}
+
+console.log('\n=== 19. 课表画布塌陷时的兜底 ===');
+{
+    // 有几台机器的 WebView 会把课块画布算成 0 宽，症状是所有课块挤成左边一条竖线。
+    // 这个兜底就是量一下，发现不对就硬给一个像素宽度。
+    const T = boot(at(2026, 9, 14, 6, 0), makeDB());
+    const els = T.els();
+    els.kbBody.clientWidth = 400;
+    els.kbTimes.offsetWidth = 40;
+
+    els.kbCanvas.offsetWidth = 20;          // 模拟塌陷
+    T.refresh();
+    ok('画布被压塌时补上像素宽度', els.kbCanvas.style.width === '360px', els.kbCanvas.style.width);
+    ok('同时把时间列的位置让出来', els.kbCanvas.style.marginLeft === '40px', els.kbCanvas.style.marginLeft);
+
+    // 换一个「量出来是正常」的宽度：不该动它
+    els.kbCanvas.style.width = '';
+    els.kbCanvas.style.marginLeft = '';
+    els.kbCanvas.offsetWidth = 360;
+    T.refresh();
+    ok('画布正常时不干预', els.kbCanvas.style.width === '', els.kbCanvas.style.width);
+
+    // 窗口变窄之后要能重新算
+    els.kbCanvas.style.width = '';
+    els.kbCanvas.offsetWidth = 20;
+    els.kbBody.clientWidth = 300;
+    T.refresh();
+    ok('换了宽度会重新算', els.kbCanvas.style.width === '260px', els.kbCanvas.style.width);
     T.__restore();
 }
 

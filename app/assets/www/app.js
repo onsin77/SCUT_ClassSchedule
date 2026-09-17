@@ -443,6 +443,19 @@
         $('kbLines').innerHTML = lines;
         $('kbCanvas').style.height = totalH + 'px';
 
+        // 兜底：布局已经改成块级的了，但万一某个 WebView 还是把画布算成 0 宽
+        //（症状就是所有课块挤成左边一条竖线），这里量一下，不对就硬给一个像素宽度。
+        // 注意别写 else 去清它 —— renderKb 可能被连着调两次，
+        // 清掉之后下一遍又会退回塌陷状态，来回抖。
+        var kbb = $('kbBody'), kbc = $('kbCanvas'), kbt = $('kbTimes');
+        if (kbb && kbc && kbt) {
+            var wantW = kbb.clientWidth - kbt.offsetWidth;
+            if (wantW > 80 && kbc.offsetWidth < wantW * 0.9) {
+                kbc.style.width = wantW + 'px';
+                kbc.style.marginLeft = kbt.offsetWidth + 'px';
+            }
+        }
+
         // 课程块。按「列」来攒：调休会把某天的课挪到另一列上显示
         var items = [];
         days.forEach(function (d) {
@@ -555,10 +568,18 @@
                 changed = true;
             }
         });
-        // 每天早上清掉昨天的：消息中心只留今天的，不然越攒越多
+        // 清掉两类脏记录：
+        //   ① 昨天以前的（每天早上清一次，消息中心只留今天的）
+        //   ② 还没到点、但计划里已经没有的 —— 比如那条提醒事项/课程被删了、
+        //      那天被禁用了、课被调休挪走了。这种永远不会再响，留着只会让人以为发过消息
+        var nowMs = Date.now();
         var dayStart = startOfDay(new Date()).getTime();
         Object.keys(DB.msgs).forEach(function (k) {
-            if (!DB.msgs[k] || DB.msgs[k].at < dayStart) { delete DB.msgs[k]; changed = true; }
+            var m = DB.msgs[k];
+            if (!m || m.at < dayStart || (m.at > nowMs && !plan[k])) {
+                delete DB.msgs[k];
+                changed = true;
+            }
         });
         // 同一时刻、同样内容只留一条。老版本的 key 里带课程序号，
         // 课表顺序一变就会攒出若干看不出区别的"重复"消息，在这里合并掉。
@@ -1124,19 +1145,24 @@
     }
 
     var schedTimer = null;
-    function scheduleAll() {
+    function scheduleAll(now) {
         clearTimeout(schedTimer);
-        schedTimer = setTimeout(function () {
-            var plan = buildPlan();
-            syncMsgs(plan);
-            updateDot();
-            if (currentTab === 'msg') renderMsg();
-            if (!A || !A.schedule) return;
-            try {
-                // 计划 + 图片分开传：同一张图只传一次，重复的课不会各塞一份 base64
-                A.schedule(JSON.stringify(plan), JSON.stringify(planImgs));
-            } catch (err) { }
-        }, 400);
+        // 平时的改动合并 400ms 再重排；但"删掉一条提醒"这种必须马上生效 ——
+        // 否则用户在这 400ms 里把 App 划掉，被删的那条闹钟就还挂在系统里，到点照样响
+        if (now) { runSchedule(); return; }
+        schedTimer = setTimeout(runSchedule, 400);
+    }
+
+    function runSchedule() {
+        var plan = buildPlan();
+        syncMsgs(plan);
+        updateDot();
+        if (currentTab === 'msg') renderMsg();
+        if (!A || !A.schedule) return;
+        try {
+            // 计划 + 图片分开传：同一张图只传一次，重复的课不会各塞一份 base64
+            A.schedule(JSON.stringify(plan), JSON.stringify(planImgs));
+        } catch (err) { }
     }
 
     /* ------------------------------------------------------------------ PDF 导出 */
@@ -1715,7 +1741,7 @@
     function openHelp() {
         $('sheetBody').onclick = null;
         var h = '<div class="sheet-head"><span class="t">帮助</span></div>' +
-            '<div class="sheet-sub">华工课程表 v1.1.2 · 每个功能怎么用</div>' +
+            '<div class="sheet-sub">华工课程表 v1.1.4 · 每个功能怎么用</div>' +
             HELP_ITEMS.map(function (o) {
                 return '<div class="help-item"><div class="hi">' + o.i + '</div><div style="flex:1;min-width:0">' +
                     '<div class="ht">' + o.t + '</div><div class="hd">' + o.d + '</div></div></div>';
@@ -2382,7 +2408,7 @@
             if (ev.target.id === 'tdDel') {
                 if (!confirm('删除提醒事项「' + todoCtx.name + '」？')) return;
                 DB.todos = DB.todos.filter(function (x) { return x.id !== todoCtx.id; });
-                save(); refresh(); scheduleAll();
+                save(); refresh(); scheduleAll(true);   // 删了就得立刻重排，不能等那 400ms
                 $('sheetBody').onclick = null;
                 toast('已删除');
                 drawTodoList();
@@ -2500,7 +2526,7 @@
         printHtml: function (kind) {
             return wrapPrint(kind === 'week' ? buildWeekPrint() : buildRawPrint());
         },
-        version: '1.1.2'
+        version: '1.1.4'
     };
 
     /* ------------------------------------------------------------------ 启动 */
